@@ -23,18 +23,30 @@ from dataloader import DataManager
 from model import ModelWiseCNNClassifier, ModelWiseTransformerClassifier, TransformerOnlyClassifier
 
 
-
 class SupervisedTrainer:
     def __init__(self, data, model, en_labels, id2label, args):
         self.data = data
         self.model = model
         self.en_labels = en_labels
+        # id2label: Mapping from IDs to labels.id2label.
         self.id2label =id2label
 
         self.seq_len = args.seq_len
         self.num_train_epochs = args.num_train_epochs
         self.weight_decay = args.weight_decay
         self.lr = args.lr
+        # Warm-up ratio for the learning rate scheduler.
+        # specifies the fraction of the total training steps during which the learning rate will gradually increase (warm-up phase).
+        # After the warm-up phase, the learning rate typically decays according to the scheduler.
+        # 1. Stabilizing Training:
+        # At the beginning of training, large gradients can destabilize updates.
+        # A warm-up period allows the model to start training with small learning rates and gradually ramp up.
+
+        # 2. Preventing Gradient Explosions:
+        # Gradually increasing the learning rate reduces the risk of large updates that might cause gradient explosions.
+        
+        # 3. Improved Convergence:
+        # Warm-up has been shown empirically to improve the convergence of large-scale models and transformers.
         self.warm_up_ratio = args.warm_up_ratio
 
         self.device = torch.device(
@@ -48,7 +60,9 @@ class SupervisedTrainer:
             self.data.train_dataloader) * self.num_train_epochs
         no_decay = ["bias", "LayerNorm.weight"]
 
+        # Retrieve model parameters.
         named_parameters = self.model.named_parameters()
+        # Separate parameters into decay and no-decay groups.
         optimizer_grouped_parameters = [
             {
                 "params": [
@@ -81,20 +95,25 @@ class SupervisedTrainer:
     def train(self, ckpt_name='linear_en.pt'):
         for epoch in trange(int(self.num_train_epochs), desc="Epoch"):
             self.model.train()
+            # Accumulate training loss.
             tr_loss = 0
+            # Count training steps.
             nb_tr_steps = 0
             # train
             for step, inputs in enumerate(
                     tqdm(self.data.train_dataloader, desc="Iteration")):
                 for k, v in inputs.items():
+                    # Move tensors to the appropriate device.
                     if isinstance(v, torch.Tensor):
                         inputs[k] = v.to(self.device)
+                        
+                # Enable gradient calculation.
                 with torch.set_grad_enabled(True):
                     labels = inputs['labels']
                     output = self.model(inputs['features'], inputs['labels'])
                     logits = output['logits']
                     loss = output['loss']
-                    # print(loss.item())
+                    
                     self.optimizer.zero_grad()
                     loss.backward()
                     self.optimizer.step()
@@ -103,6 +122,7 @@ class SupervisedTrainer:
                     tr_loss += loss.item()
                     nb_tr_steps += 1
 
+            # Compute and log the average training loss.
             loss = tr_loss / nb_tr_steps
             print(f'epoch {epoch+1}: train_loss {loss}')
             # test
@@ -127,6 +147,7 @@ class SupervisedTrainer:
             for k, v in inputs.items():
                 if isinstance(v, torch.Tensor):
                     inputs[k] = v.to(self.device)
+            # Disable gradient calculation.
             with torch.no_grad():
                 labels = inputs['labels']
                 output = self.model(inputs['features'], inputs['labels'])
@@ -144,7 +165,7 @@ class SupervisedTrainer:
         #     f.write(json.dumps(true_labels[3], ensure_ascii=False) + '\n')
         #     f.write(json.dumps(pred_labels[3], ensure_ascii=False) + '\n')
 
-
+        # Evaluate at different levels.
         if content_level_eval:
             # content level evaluation
             print("*" * 8, "Content Level Evalation", "*" * 8)
@@ -154,7 +175,7 @@ class SupervisedTrainer:
             print("*" * 8, "Sentence Level Evalation", "*" * 8)
             sent_result = self.sent_level_eval(texts, true_labels, pred_labels)
 
-        # word level evalation
+        # word level evalation/
         print("*" * 8, "Word Level Evalation", "*" * 8)
         true_labels = np.array(true_labels)
         pred_labels = np.array(pred_labels)

@@ -17,6 +17,9 @@ from backend_model import (SnifferGPTNeoModel,
                            SnifferStableLMTunedModel)
 from backend_t5 import T5
 
+# MODEL_MAPPING_NAMES: A dictionary (specifically OrderedDict to maintain insertion order)
+# maps model names (as strings) to their corresponding implementation classes.
+# This allows for easy dynamic selection of the model backend at runtime.
 MODEL_MAPPING_NAMES = OrderedDict([
     ("gpt2", SnifferGPT2Model),
     ("gptneo", SnifferGPTNeoModel),
@@ -33,6 +36,7 @@ MODEL_MAPPING_NAMES = OrderedDict([
 ])
 
 
+# Defines a function to handle command-line arguments.
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -59,13 +63,16 @@ if __name__ == "__main__":
     # --model: [damo, gpt2, gptj, gptneo, wenzhong, skywork, llama]
     # python backend_api.py --port 6006 --timeout 30000 --debug --model=damo --gpu=3
     args = parse_args()
+    # Ensures CUDA operations are synchronous for debugging purposes.
     os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+    # Configures which GPU should be used by setting the corresponding environment variable.
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
     if args.model == 't5':
         server = Server()
         server.append_worker(T5)
         server.run()
     else:
+        # Dynamically selects the model class from MODEL_MAPPING_NAMES based on the --model argument.
         sniffer_model = MODEL_MAPPING_NAMES[args.model]
         server = Server()
         server.append_worker(sniffer_model)

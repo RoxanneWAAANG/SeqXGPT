@@ -25,10 +25,13 @@ def access_api(text, api_url, do_generate=False):
             "text": text,
             "do_generate": do_generate,
         }
+        # msgpack.packb: Serializes post_data for transmission.
+        # Sends a POST request to the API with the serialized data.
         prediction = client.post(api_url,
                                  data=msgpack.packb(post_data),
                                  timeout=None)
     if prediction.status_code == 200:
+        # msgpack.unpackb: Deserializes the response.
         content = msgpack.unpackb(prediction.content)
     else:
         content = None
@@ -40,6 +43,7 @@ def get_features(type, input_file, output_file):
     get [losses, begin_idx_list, ll_tokens_list, label_int, label] based on raw lines
     """
 
+    # Defines English (en) and Chinese (cn) model names for processing.
     en_model_names = ['gpt_2', 'gpt_neo', 'gpt_J', 'llama']
     cn_model_names = ['wenzhong', 'sky_text', 'damo', 'chatglm']
 
@@ -78,6 +82,7 @@ def get_features(type, input_file, output_file):
         'moss': 6
     }
 
+    # Corresponding API URLs for each model.
     # line = {'text': '', 'label': ''}
     with open(input_file, 'r') as f:
         lines = [json.loads(line) for line in f]
@@ -85,6 +90,7 @@ def get_features(type, input_file, output_file):
 
     print('input file:{}, length:{}'.format(input_file, len(lines)))
 
+    # Reads the input file, assuming each line is a JSON object.
     with open(output_file, 'w', encoding='utf-8') as f:
         for data in tqdm(lines):
             line = data['text']
@@ -103,6 +109,7 @@ def get_features(type, input_file, output_file):
             label_int = label_dict[label]
 
             error_flag = False
+            # Iterates over the dataset, processes each text and label.
             for api in model_apis:
                 try:
                     loss, begin_word_idx, ll_tokens = access_api(line, api)
@@ -142,6 +149,7 @@ def process_features(input_file, output_file, do_normalize=False):
 
     # jsonl read
     with open(input_file, 'r') as f:
+        # Processes raw features into normalized and structured data.
         raw_features = [json.loads(line) for line in f.readlines()]
     
     # json read
@@ -152,6 +160,7 @@ def process_features(input_file, output_file, do_normalize=False):
     # raw_features = json.load(open(input_file, 'r', encoding='utf-8'))
     print('input file:{}, length:{}'.format(input_file, len(raw_features)))
 
+    # Reads the raw features from a JSONL file.
     with open(output_file, 'w', encoding='utf-8') as f:
         for raw_feature in tqdm(raw_features):
             losses = raw_feature['losses']
@@ -160,7 +169,6 @@ def process_features(input_file, output_file, do_normalize=False):
             label_int = raw_feature['label_int']
             label = raw_feature['label']
             text = raw_feature['text']
-
 
             # losses, begin_idx_list, ll_tokens_list, label_int, label = raw_feature
             #  python gen_features.py --process_features --input_file ../features/raw_features/en_alpaca_features.jsonl --output_file ../features/raw_processed_features/en_alpaca_processed_features.jsonl
@@ -179,6 +187,7 @@ def process_features(input_file, output_file, do_normalize=False):
                     ll_tokens_list[idx] = ll_tokens[max_begin_idx:]
                 # ll_tokens_list = ll_tokens_list[:, max_begin_idx:]
 
+                # Iterates through the raw features, extracting necessary fields.
                 # Get the length of all vectors and take the minimum
                 min_len = np.min([len(ll_tokens) for ll_tokens in ll_tokens_list])
                 # Align the lengths of all vectors
@@ -186,6 +195,7 @@ def process_features(input_file, output_file, do_normalize=False):
                     ll_tokens_list[idx] = ll_tokens[:min_len]
                 # ll_tokens_list = ll_tokens_list[:, :min_len]
 
+                # Convert the list of lists to a numpy array.
                 if do_normalize:
                     # print("normalize: {}".format(do_normalize))
                     # Normalize using L1 normalization
@@ -206,10 +216,13 @@ def process_features(input_file, output_file, do_normalize=False):
                 print()
                 continue
 
+            # Computes statistical metrics like standard deviation, Pearson, and Spearman correlations.
             try:
+                # lt_zero_percents: Proportion of elements less than zero in the deviations.
                 lt_zero_percents = []
                 std_deviations = []
                 deviations = []
+                # Pearson and Spearman: Correlation metrics between token lists.
                 pearson_list = []
                 spearmann_list = []
                 

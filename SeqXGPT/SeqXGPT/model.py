@@ -8,6 +8,9 @@ from fastNLP.modules.torch import MLP,ConditionalRandomField,allowed_transitions
 from torch.nn import CrossEntropyLoss
 
 
+# Feature Extraction: CNN.
+# Contextual Understanding: CRF.
+# Position Encoding: None.
 class ConvFeatureExtractionModel(nn.Module):
 
     def __init__(
@@ -45,6 +48,7 @@ class ConvFeatureExtractionModel(nn.Module):
         return x
 
 
+# Convolution-based sequence labeling model with CRF.
 class ModelWiseCNNClassifier(nn.Module):
 
     def __init__(self, id2labels, dropout_rate=0.1):
@@ -62,6 +66,8 @@ class ModelWiseCNNClassifier(nn.Module):
         self.label_num = len(id2labels)
         self.dropout = nn.Dropout(dropout_rate)
         self.classifier = nn.Sequential(nn.Linear(embedding_size, self.label_num))
+        # Conditional Random Field (CRF) ensures structured predictions with label dependencies.
+        # Allowed Transitions: Defined by id2labels for valid label sequences.
         self.crf = ConditionalRandomField(num_tags=self.label_num, allowed_transitions=allowed_transitions(id2labels))
         self.crf.trans_m.data *= 0
 
@@ -83,10 +89,12 @@ class ModelWiseCNNClassifier(nn.Module):
         logits = self.classifier(dropout_outputs)
         
         if self.training:
+            # Training mode: Cross-entropy loss.
             loss_fct = CrossEntropyLoss(ignore_index=-1)
             loss = loss_fct(logits.view(-1, self.label_num), labels.view(-1))
             output = {'loss': loss, 'logits': logits}
         else:
+            # Inference mode: Viterbi decoding with CRF.
             mask = labels.gt(-1)
             paths, scores = self.crf.viterbi_decode(logits=logits, mask=mask)
             paths[mask==0] = -1
@@ -96,6 +104,9 @@ class ModelWiseCNNClassifier(nn.Module):
         return output
     
 
+# Feature Extraction: CNN + Transformer.
+# Contextual Understanding: Transformer + CRF.
+# Position Encoding: Sinusoidal Positional Encoding.
 class ModelWiseTransformerClassifier(nn.Module):
 
     def __init__(self, id2labels, seq_len, intermediate_size = 512, num_layers=2, dropout_rate=0.1):
@@ -145,6 +156,8 @@ class ModelWiseTransformerClassifier(nn.Module):
         mask = labels.gt(-1)
         padding_mask = ~mask
 
+        # Processes inputs with CNN, adds positional encoding,
+        # and passes through the Transformer encoder.
         x = x.transpose(1, 2)
         out1 = self.conv_feat_extract(x[:, 0:1, :])  
         out2 = self.conv_feat_extract(x[:, 1:2, :])  
@@ -171,6 +184,10 @@ class ModelWiseTransformerClassifier(nn.Module):
         return output
     
 
+# Feature Extraction: Transformer.
+# Contextual Understanding: Transformer + CRF.
+# Position Encoding: Sinusoidal Positional Encoding.
+# Directly process sequences using a Transformer encoder.
 class TransformerOnlyClassifier(nn.Module):
 
     def __init__(self, id2labels, seq_len, embedding_size=4, num_heads=2, intermediate_size=64, num_layers=2, dropout_rate=0.1):
