@@ -47,9 +47,9 @@ def get_features(type, input_file, output_file):
     en_model_names = ['gpt_2', 'gpt_neo', 'gpt_J', 'llama']
     cn_model_names = ['wenzhong', 'sky_text', 'damo', 'chatglm']
 
-    gpt_2_api = 'http://10.176.52.120:20098/inference'
-    gpt_neo_api = 'http://10.176.52.120:20097/inference'
-    gpt_J_api = 'http://10.176.52.120:20099/inference'
+    gpt_2_api = 'http://localhost:20098/inference'
+    gpt_neo_api = 'http://localhost:20090/inference'
+    gpt_J_api = 'http://localhost:20099/inference'
     llama_api = 'http://10.176.52.120:20100/inference'
     wenzhong_api = 'http://10.176.52.101:20160/inference'
     sky_text_api = 'http://10.176.52.120:20102/inference'

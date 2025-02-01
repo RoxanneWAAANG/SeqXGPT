@@ -21,7 +21,7 @@ if project_path not in sys.path:
 import backend_model_info
 from dataloader import DataManager
 from model import ModelWiseCNNClassifier, ModelWiseTransformerClassifier, TransformerOnlyClassifier
-
+from model import SeqXGPTModel
 
 class SupervisedTrainer:
     def __init__(self, data, model, en_labels, id2label, args):
@@ -326,6 +326,13 @@ def split_dataset(data_path, train_path, test_path, train_ratio=0.9):
 import argparse
 def parse_args():
     parser = argparse.ArgumentParser()
+    # Add argument for processing method selection.
+    parser.add_argument("--method", type=str, choices=["patch_average", "convolution_like", "patch_shuffle"], default="patch_average")
+    parser.add_argument("--patch_size", type=int, default=10)
+    parser.add_argument("--kernel_size", type=int, default=10)
+    parser.add_argument("--stride", type=int, default=5)
+    #=============================================#
+
     parser.add_argument('--model', type=str, default='Transformer')
     parser.add_argument('--gpu', type=str, default='0')
     parser.add_argument('--train_mode', type=str, default='classify')
@@ -377,7 +384,10 @@ if __name__ == "__main__":
     """linear classify"""
     if args.train_mode == 'classify':
         print('-' * 32 + 'classify' + '-' * 32)
-        if args.model == 'CNN':
+        if args.model == 'SeqXGPT':
+            classifier = SeqXGPTModel(embedding_size=768, seq_len=1024, num_layers=6, id2labels=data.id2labels)
+            classifier.to("cuda" if torch.cuda.is_available() else "cpu")
+        elif args.model == 'CNN':
             print('-' * 32 + "CNN" + '-' * 32)
             classifier = ModelWiseCNNClassifier(id2labels=id2label)
             ckpt_name = ''
