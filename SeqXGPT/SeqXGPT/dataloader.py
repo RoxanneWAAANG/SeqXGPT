@@ -83,7 +83,8 @@ class DataManager:
         for item in tqdm(samples):
             text = item['text']
             label = item['label']
-            prompt_len = item['prompt_len']
+            prompt_len = item.get('prompt_len', 0)
+            # prompt_len = item['prompt_len']
             # prompt_len = 0
 
             # if label in ['gptj', 'gpt2', 'llama', 'gpt3re']:
