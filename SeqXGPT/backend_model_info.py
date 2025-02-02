@@ -1,5 +1,6 @@
 # All models that Sniffer will use.
-en_model_names = ['gpt_2', 'gpt_neo', 'gpt_J', 'llama']
+# en_model_names = ['gpt_2', 'gpt_neo', 'gpt_J', 'llama']
+en_model_names = ['gpt_2']
 cn_model_names = ['wenzhong', 'sky_text', 'damo', 'chatglm']
 
 # feature
@@ -12,16 +13,21 @@ cur_feat_num = 4
 en_ckpt_path = ""
 cn_ckpt_path = ""
 
+# en_labels = {
+#     'gpt2': 0,
+#     'gptneo': 1,
+#     'gptj': 1,
+#     'llama': 2,
+#     'gpt3re': 3,
+#     'gpt3sum': 3,
+#     'human': 4
+# }
+# en_class_num = 5
 en_labels = {
     'gpt2': 0,
-    'gptneo': 1,
-    'gptj': 1,
-    'llama': 2,
-    'gpt3re': 3,
-    'gpt3sum': 3,
-    'human': 4
+    'human': 1,
 }
-en_class_num = 5
+en_class_num = 2
 
 cn_labels = {
     'wenzhong': 0,
