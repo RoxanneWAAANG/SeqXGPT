@@ -39,6 +39,7 @@ MODEL_MAPPING_NAMES = OrderedDict([
 # Defines a function to handle command-line arguments.
 def parse_args():
     parser = argparse.ArgumentParser()
+    # use gpt2 first.
     parser.add_argument(
         "--model",
         type=str,
@@ -53,6 +54,7 @@ def parse_args():
                         default='0',
                         help="Set os.environ['CUDA_VISIBLE_DEVICES'].")
 
+    # port 6006, timeout 30000, debug False.
     parser.add_argument("--port", help="mosec args.")
     parser.add_argument("--timeout", help="mosec args.")
     parser.add_argument("--debug", action="store_true", help="mosec args.")
