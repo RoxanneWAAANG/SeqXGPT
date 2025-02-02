@@ -29,6 +29,7 @@ def access_api(text, api_url, do_generate=False):
         # Sends a POST request to the API with the serialized data.
         prediction = client.post(api_url,
                                  data=msgpack.packb(post_data),
+                                 headers={"Content-Type": "application/msgpack"},
                                  timeout=None)
     if prediction.status_code == 200:
         # msgpack.unpackb: Deserializes the response.
@@ -56,19 +57,25 @@ def get_features(type, input_file, output_file):
     damo_api = 'http://10.176.52.120:20101/inference'
     chatglm_api = 'http://10.176.52.120:20103/inference'
 
-    en_model_apis = [gpt_2_api, gpt_neo_api, gpt_J_api, llama_api]
+    # en_model_apis = [gpt_2_api, gpt_neo_api, gpt_J_api, llama_api]
+    en_model_apis = [gpt_2_api]
     cn_model_apis = [wenzhong_api, sky_text_api, damo_api, chatglm_api]
+
+    # en_labels = {
+    #     'gpt2': 0,
+    #     'gptneo': 1,
+    #     'gptj': 1,
+    #     'llama': 2,
+    #     'gpt3re': 3,
+    #     'gpt3sum': 3,
+    #     'human': 4,
+    #     'alpaca': None,
+    #     'dolly': None,
+    # }
 
     en_labels = {
         'gpt2': 0,
-        'gptneo': 1,
-        'gptj': 1,
-        'llama': 2,
-        'gpt3re': 3,
-        'gpt3sum': 3,
-        'human': 4,
-        'alpaca': None,
-        'dolly': None,
+        'human': 1,
     }
 
     cn_labels = {
