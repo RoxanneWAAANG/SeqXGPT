@@ -15,9 +15,10 @@ from sklearn.metrics import precision_score, recall_score, accuracy_score, f1_sc
 
 warnings.filterwarnings('ignore')
 
-project_path = os.path.abspath('')
-if project_path not in sys.path:
-    sys.path.append(project_path)
+# project_path = os.path.abspath('')
+# if project_path not in sys.path:
+#     sys.path.append(project_path)
+sys.path.append("/mnt/xinfeng/research/AI_Human_Detection/Test_Ruoxin_Wang/SeqXGPT/SeqXGPT/")
 import backend_model_info
 from dataloader import DataManager
 from model import ModelWiseCNNClassifier, ModelWiseTransformerClassifier, TransformerOnlyClassifier
@@ -54,6 +55,13 @@ class SupervisedTrainer:
         # self.device = torch.device('cpu')
         self.model.to(self.device)
         self._create_optimizer_and_scheduler()
+
+    def _check_data_balance(self):
+        all_labels = []
+        for batch in self.data.train_dataloader:
+            all_labels.extend(batch['labels'].cpu().numpy().flatten())
+        unique, counts = np.unique(all_labels, return_counts=True)
+        # print("Label distribution:", dict(zip(unique, counts)))
 
     def _create_optimizer_and_scheduler(self):
         num_training_steps = len(
@@ -99,6 +107,8 @@ class SupervisedTrainer:
             tr_loss = 0
             # Count training steps.
             nb_tr_steps = 0
+            # Verify data balance.
+            self._check_data_balance()
             # train
             for step, inputs in enumerate(
                     tqdm(self.data.train_dataloader, desc="Iteration")):
@@ -142,21 +152,22 @@ class SupervisedTrainer:
         true_labels = []
         pred_labels = []
         total_logits = []
-        for step, inputs in enumerate(
-                tqdm(self.data.test_dataloader, desc="Iteration")):
-            for k, v in inputs.items():
-                if isinstance(v, torch.Tensor):
-                    inputs[k] = v.to(self.device)
+
+        for step, inputs in enumerate(tqdm(self.data.test_dataloader, desc="Testing")):
+            # Move inputs to device
+            inputs = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
+                for k, v in inputs.items()}
             # Disable gradient calculation.
             with torch.no_grad():
-                labels = inputs['labels']
                 output = self.model(inputs['features'], inputs['labels'])
+                # print("Processed labels:", output['proc_labels'][0][:10])
+                # print("Predictions:", output['preds'][0][:10])
                 logits = output['logits']
-                preds = output['preds']
+                proc_labels = output.get('proc_labels', inputs['labels'])
                 
                 texts.extend(inputs['text'])
-                pred_labels.extend(preds.cpu().tolist())
-                true_labels.extend(labels.cpu().tolist())
+                pred_labels.extend(output['preds'].cpu().tolist())
+                true_labels.extend(proc_labels.cpu().tolist())
                 total_logits.extend(logits.cpu().tolist())
         
         # with open("", 'w') as f:
@@ -165,6 +176,10 @@ class SupervisedTrainer:
         #     f.write(json.dumps(true_labels[3], ensure_ascii=False) + '\n')
         #     f.write(json.dumps(pred_labels[3], ensure_ascii=False) + '\n')
 
+        # Convert to numpy arrays
+        true_labels = np.array(true_labels)
+        pred_labels = np.array(pred_labels)
+        
         # Evaluate at different levels.
         if content_level_eval:
             # content level evaluation
@@ -175,18 +190,60 @@ class SupervisedTrainer:
             print("*" * 8, "Sentence Level Evalation", "*" * 8)
             sent_result = self.sent_level_eval(texts, true_labels, pred_labels)
 
-        # word level evalation/
-        print("*" * 8, "Word Level Evalation", "*" * 8)
-        true_labels = np.array(true_labels)
-        pred_labels = np.array(pred_labels)
-        true_labels_1d = true_labels.reshape(-1)
-        pred_labels_1d = pred_labels.reshape(-1)
-        mask = true_labels_1d != -1
-        true_labels_1d = true_labels_1d[mask]
-        pred_labels_1d = pred_labels_1d[mask]
-        accuracy = (true_labels_1d == pred_labels_1d).astype(np.float32).mean().item()
-        print("Accuracy: {:.1f}".format(accuracy*100))
-        pass
+        # Word-level evaluation with improved handling
+        print("\n" + "*" * 8 + " Word Level Evaluation " + "*" * 8)
+        total_valid = 0
+        correct = 0
+        all_true = []
+        all_pred = []
+        
+        for t_seq, p_seq in zip(true_labels, pred_labels):
+            # Convert to numpy arrays and filter padding
+            t_seq = np.array(t_seq)
+            p_seq = np.array(p_seq)
+            valid_mask = t_seq != -1
+            
+            valid_t = t_seq[valid_mask]
+            valid_p = p_seq[valid_mask]
+            
+            # Safety checks
+            if len(valid_t) == 0:
+                continue
+                
+            if len(valid_t) != len(valid_p):
+                print(f"Length mismatch: true {len(valid_t)} vs pred {len(valid_p)}")
+                continue
+                
+            total_valid += len(valid_t)
+            correct += (valid_t == valid_p).sum()
+            all_true.extend(valid_t.tolist())
+            all_pred.extend(valid_p.tolist())
+
+        # Calculate metrics
+        if total_valid > 0:
+            accuracy = correct / total_valid
+            macro_f1 = f1_score(all_true, all_pred, average='macro')
+            print(f"Word Level Accuracy: {accuracy*100:.1f}%")
+            print(f"Macro F1 Score: {macro_f1*100:.1f}%")
+            print(f"Total Valid Tokens: {total_valid:,}")
+            
+            # Per-class metrics
+            unique_labels = np.unique(all_true)
+            if len(unique_labels) > 1:
+                precision = precision_score(all_true, all_pred, average=None)
+                recall = recall_score(all_true, all_pred, average=None)
+                print("\nClass-wise Performance:")
+                for idx, label in enumerate(unique_labels):
+                    label_name = self.id2label.get(label, str(label))
+                    print(f"{label_name}: Precision {precision[idx]*100:.1f}% | Recall {recall[idx]*100:.1f}%")
+        else:
+            print("No valid tokens found for evaluation!")
+
+        return {
+            'true_labels': all_true,
+            'pred_labels': all_pred,
+            'total_valid': total_valid
+        }
     
     def content_level_eval(self, texts, true_labels, pred_labels):
         from collections import Counter
@@ -255,11 +312,15 @@ class SupervisedTrainer:
         """most_common_tag is a tuple: (tag, times)"""
         from collections import Counter
 
-        tags = [self.id2label[tag] for tag in tags]
-        tags = [tag.split('-')[-1] for tag in tags]
-        tag_counts = Counter(tags)
+        # Filter out padding (-1) tags.
+        filtered_tags = [t for t in tags if t != -1]
+        if not filtered_tags:
+            # Return a default tag. Adjust the default to match one of your keys.
+            return ("human", 1)  # or ("gpt2", 1) based on your application
+        mapped_tags = [self.id2label[tag] for tag in filtered_tags]
+        mapped_tags = [tag.split('-')[-1] for tag in mapped_tags]
+        tag_counts = Counter(mapped_tags)
         most_common_tag = tag_counts.most_common(1)[0]
-
         return most_common_tag
 
     def _get_precision_recall_acc_macrof1(self, true_labels, pred_labels):
@@ -333,7 +394,7 @@ def parse_args():
     parser.add_argument("--stride", type=int, default=5)
     #=============================================#
 
-    parser.add_argument('--model', type=str, default='Transformer')
+    parser.add_argument('--model', type=str, default='SeqXGPT')
     parser.add_argument('--gpu', type=str, default='0')
     parser.add_argument('--train_mode', type=str, default='classify')
     parser.add_argument('--batch_size', type=int, default=32)
@@ -365,16 +426,20 @@ if __name__ == "__main__":
         split_dataset(data_path=args.data_path, train_path=args.train_path, test_path=args.test_path, train_ratio=args.train_ratio)
 
     # en_labels = backend_model_info.en_labels
+    # en_labels = {
+    #     'gpt2': 0,
+    #     'gptneo': 1,
+    #     'gptj': 2,
+    #     'llama': 3,
+    #     'gpt3re': 4,
+    #     # 'gpt3sum': 3,
+    #     'human': 5
+    # }
+    # en_labels = {'AI':0, 'human':1}
     en_labels = {
         'gpt2': 0,
-        'gptneo': 1,
-        'gptj': 2,
-        'llama': 3,
-        'gpt3re': 4,
-        # 'gpt3sum': 3,
-        'human': 5
+        'human': 1,
     }
-    # en_labels = {'AI':0, 'human':1}
 
     id2label = construct_bmes_labels(en_labels)
     label2id = {v: k for k, v in id2label.items()}
@@ -385,19 +450,20 @@ if __name__ == "__main__":
     if args.train_mode == 'classify':
         print('-' * 32 + 'classify' + '-' * 32)
         if args.model == 'SeqXGPT':
-            classifier = SeqXGPTModel(embedding_size=768, seq_len=1024, num_layers=6, id2labels=data.id2labels)
+            classifier = SeqXGPTModel(embedding_size=768, seq_len=1024, num_layers=6, id2labels=id2label)
             classifier.to("cuda" if torch.cuda.is_available() else "cpu")
+            ckpt_name = 'seqxgpt_cls_model.pt'
         elif args.model == 'CNN':
             print('-' * 32 + "CNN" + '-' * 32)
             classifier = ModelWiseCNNClassifier(id2labels=id2label)
-            ckpt_name = ''
+            ckpt_name = 'cnn_cls_model.pt'
         elif args.model == 'RNN':
             print('-' * 32 + "RNN" + '-' * 32)
             classifier = TransformerOnlyClassifier(id2labels=id2label, seq_len=args.seq_len)
-            ckpt_name = ''
+            ckpt_name = 'rnn_cls_model.pt'
         else:
             classifier = ModelWiseTransformerClassifier(id2labels=id2label, seq_len=args.seq_len)
-            ckpt_name = ''
+            ckpt_name = 'transformer_cls_model.pt'
 
         trainer = SupervisedTrainer(data, classifier, en_labels, id2label, args)
 
@@ -415,10 +481,14 @@ if __name__ == "__main__":
         print('-' * 32 + 'contrastive_learning' + '-' * 32)
         if args.model == 'CNN':
             classifier = ModelWiseCNNClassifier(class_num=backend_model_info.en_class_num)
-            ckpt_name = ''
+            ckpt_name = 'cnn_con_model.pt'
+        elif args.model == 'SeqXGPT':
+            classifier = SeqXGPTModel(embedding_size=768, seq_len=1024, num_layers=6, id2labels=id2label)
+            classifier.to("cuda" if torch.cuda.is_available() else "cpu")
+            ckpt_name = 'seqxgpt_con_model.pt'
         else:
             classifier = ModelWiseTransformerClassifier(class_num=backend_model_info.en_class_num)
-            ckpt_name = ''
+            ckpt_name = 'transformer_con_model.pt'
 
         trainer = SupervisedTrainer(data, classifier, loss_criterion = 'ContrastiveLoss')
         trainer.train(ckpt_name=ckpt_name)
@@ -428,16 +498,20 @@ if __name__ == "__main__":
         print('-' * 32 + 'contrastive_classify' + '-' * 32)
         if args.model == 'CNN':
             classifier = ModelWiseCNNClassifier(class_num=backend_model_info.en_class_num)
-            ckpt_name = ''
+            ckpt_name = 'cnn_cc_model.pt'
             saved_model = torch.load(ckpt_name)
             classifier.load_state_dict(saved_model.state_dict())
-            ckpt_name = ''
+        elif args.model == 'SeqXGPT':
+            classifier = SeqXGPTModel(embedding_size=768, seq_len=1024, num_layers=6, id2labels=id2label)
+            classifier.to("cuda" if torch.cuda.is_available() else "cpu")
+            ckpt_name = 'seqxgpt_cc_model.pt'
+            saved_model = torch.load(ckpt_name)
+            classifier.load_state_dict(saved_model.state_dict())
         else:
             classifier = ModelWiseTransformerClassifier(class_num=backend_model_info.en_class_num)
-            ckpt_name = ''
+            ckpt_name = 'transformer_cc_model.pt'
             saved_model = torch.load(ckpt_name)
             classifier.load_state_dict(saved_model.state_dict())
-            ckpt_name = ''
 
         # trainer = SupervisedTrainer(data, classifier, train_mode='Contrastive_Classifier')
         trainer = SupervisedTrainer(data, classifier)
