@@ -1,0 +1,12 @@
+conda activate seqxgpt
+python /mnt/xinfeng/research/AI_Human_Detection/Test_Ruoxin_Wang/SeqXGPT/SeqXGPT/dataset/gen_features.py --get_en_features --input_file /mnt/xinfeng/research/AI_Human_Detection/Test_Ruoxin_Wang/SeqXGPT/SeqXGPT/dataset/SeqXGPT-Bench/en_gpt2_lines.jsonl --output_file /mnt/xinfeng/research/AI_Human_Detection/Test_Ruoxin_Wang/SeqXGPT/SeqXGPT/dataset/SeqXGPT_output/en_gpt2_lines.jsonl
+python /mnt/xinfeng/research/AI_Human_Detection/Test_Ruoxin_Wang/SeqXGPT/SeqXGPT/backend_api.py --port 20098 --timeout 30000 --debug --model=gpt2 --gpu=0
+python /mnt/xinfeng/research/AI_Human_Detection/Test_Ruoxin_Wang/SeqXGPT/SeqXGPT/SeqXGPT/train.py --split_dataset --data_path /mnt/xinfeng/research/AI_Human_Detection/Test_Ruoxin_Wang/SeqXGPT/SeqXGPT/dataset/SeqXGPT_output --train_path /mnt/xinfeng/research/AI_Human_Detection/Test_Ruoxin_Wang/SeqXGPT/SeqXGPT/dataset/SeqXGPT_output/en_gpt2_tr.jsonl --test_path /mnt/xinfeng/research/AI_Human_Detection/Test_Ruoxin_Wang/SeqXGPT/SeqXGPT/dataset/SeqXGPT_output/en_gpt2_te.jsonl --gpu=0
+
+check if there are any encoding issues or invalid characters in your input file:
+iconv -f utf-8 -t utf-8 -c SeqXGPT/dataset/SeqXGPT_output/en_gpt2_lines.jsonl > SeqXGPT/dataset/SeqXGPT_output/en_gpt2_lines_clean.jsonl
+
+validate that each line is proper JSON:
+cat SeqXGPT/dataset/SeqXGPT_output/en_gpt2_lines_clean.jsonl | while read line; do echo "$line" | python -m json.tool > /dev/null || echo "Invalid: $line"; done
+
+python SeqXGPT/SeqXGPT/train.py --split_dataset --data_path SeqXGPT/dataset/SeqXGPT_output --train_path SeqXGPT/dataset/SeqXGPT_output/en_gpt2_tr.jsonl --test_path SeqXGPT/dataset/SeqXGPT_output/en_gpt2_te.jsonl --gpu=0

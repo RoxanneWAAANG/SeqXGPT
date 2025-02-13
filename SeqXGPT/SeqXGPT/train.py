@@ -7,11 +7,9 @@ import warnings
 import torch.nn.functional as F
 import torch.nn as nn
 
-
 from tqdm import tqdm, trange
-from sklearn.metrics import precision_score, recall_score
-from transformers.optimization import AdamW, get_linear_schedule_with_warmup
 from sklearn.metrics import precision_score, recall_score, accuracy_score, f1_score
+from transformers.optimization import AdamW, get_linear_schedule_with_warmup
 
 warnings.filterwarnings('ignore')
 
@@ -23,6 +21,7 @@ import backend_model_info
 from dataloader import DataManager
 from model import ModelWiseCNNClassifier, ModelWiseTransformerClassifier, TransformerOnlyClassifier
 from model import SeqXGPTModel
+
 
 class SupervisedTrainer:
     def __init__(self, data, model, en_labels, id2label, args):
@@ -50,8 +49,7 @@ class SupervisedTrainer:
         # Warm-up has been shown empirically to improve the convergence of large-scale models and transformers.
         self.warm_up_ratio = args.warm_up_ratio
 
-        self.device = torch.device(
-            'cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         # self.device = torch.device('cpu')
         self.model.to(self.device)
         self._create_optimizer_and_scheduler()
@@ -100,6 +98,22 @@ class SupervisedTrainer:
             num_warmup_steps=self.warm_up_ratio * num_training_steps,
             num_training_steps=num_training_steps)
 
+    def load_model(self, ckpt_name):
+        """Safe model loading with proper allowlisting"""
+        from torch.serialization import default_restore_location
+        
+        # Allowlist custom classes
+        torch.serialization.add_safe_globals([SeqXGPTModel])
+        
+        # Load with weights_only=True
+        state_dict = torch.load(
+            ckpt_name,
+            map_location=lambda storage, loc: default_restore_location(storage, str(loc)),
+            weights_only=True
+        )
+        self.model.load_state_dict(state_dict)
+        self.model.to(self.device)
+    
     def train(self, ckpt_name='linear_en.pt'):
         for epoch in trange(int(self.num_train_epochs), desc="Epoch"):
             self.model.train()
@@ -140,10 +154,20 @@ class SupervisedTrainer:
             print('*' * 120)
             torch.save(self.model.cpu(), ckpt_name)
             self.model.to(self.device)
+            #################
+            torch.save(self.model.state_dict(), ckpt_name)
+            ###############
 
-        torch.save(self.model.cpu(), ckpt_name)
-        saved_model = torch.load(ckpt_name)
-        self.model.load_state_dict(saved_model.state_dict())
+        print("Training finished. Loading best model...")
+        ckpt_path = os.path.abspath(ckpt_name)
+        print(f"\nWill save model to: {ckpt_path}")
+        ##########
+        torch.save(self.model.state_dict(), ckpt_path)
+        print(f"\nFinal model saved to: {ckpt_path}")
+        #########
+        # torch.save(self.model.cpu(), ckpt_name)
+        # saved_model = torch.load(ckpt_name, weights_only=True)
+        # self.model.load_state_dict(saved_model.state_dict())
         return
 
     def test(self, content_level_eval=False):
@@ -388,7 +412,7 @@ import argparse
 def parse_args():
     parser = argparse.ArgumentParser()
     # Add argument for processing method selection.
-    parser.add_argument("--method", type=str, choices=["patch_average", "convolution_like", "patch_shuffle"], default="patch_average")
+    parser.add_argument("--method", type=str, choices=["patch_average", "convolution_like", "patch_shuffle"], default="patch_shuffle")
     parser.add_argument("--patch_size", type=int, default=10)
     parser.add_argument("--kernel_size", type=int, default=10)
     parser.add_argument("--stride", type=int, default=5)
@@ -406,7 +430,7 @@ def parse_args():
     parser.add_argument('--train_path', type=str, default='')
     parser.add_argument('--test_path', type=str, default='')
 
-    parser.add_argument('--num_train_epochs', type=int, default=20)
+    parser.add_argument('--num_train_epochs', type=int, default=1)
     parser.add_argument('--weight_decay', type=float, default=0.1)
     parser.add_argument('--lr', type=float, default=5e-5)
     parser.add_argument('--warm_up_ratio', type=float, default=0.1)
@@ -469,12 +493,21 @@ if __name__ == "__main__":
 
         if args.do_test:    
             print("Log INFO: do test...")
-            saved_model = torch.load(ckpt_name)
-            trainer.model.load_state_dict(saved_model.state_dict())
+            classifier = SeqXGPTModel(embedding_size=768, seq_len=1024, num_layers=6, id2labels=id2label)
+            #########################
+            trainer = SupervisedTrainer(data, classifier, en_labels, id2label, args)
+            trainer.load_model(ckpt_name)
             trainer.test(content_level_eval=args.test_content)
+            ###########################
+            # saved_model = torch.load(ckpt_name, weights_only=True)
+            # trainer.model.load_state_dict(saved_model.state_dict())
+            # trainer.test(content_level_eval=args.test_content)
         else:
             print("Log INFO: do train...")
             trainer.train(ckpt_name=ckpt_name)
+            #########
+            trainer.load_model(ckpt_name)
+            #########
 
     """contrastive training"""
     if args.train_mode == 'contrastive_learning':
@@ -499,18 +532,18 @@ if __name__ == "__main__":
         if args.model == 'CNN':
             classifier = ModelWiseCNNClassifier(class_num=backend_model_info.en_class_num)
             ckpt_name = 'cnn_cc_model.pt'
-            saved_model = torch.load(ckpt_name)
+            saved_model = torch.load(ckpt_name, weights_only=True)
             classifier.load_state_dict(saved_model.state_dict())
         elif args.model == 'SeqXGPT':
             classifier = SeqXGPTModel(embedding_size=768, seq_len=1024, num_layers=6, id2labels=id2label)
             classifier.to("cuda" if torch.cuda.is_available() else "cpu")
             ckpt_name = 'seqxgpt_cc_model.pt'
-            saved_model = torch.load(ckpt_name)
+            saved_model = torch.load(ckpt_name, weights_only=True)
             classifier.load_state_dict(saved_model.state_dict())
         else:
             classifier = ModelWiseTransformerClassifier(class_num=backend_model_info.en_class_num)
             ckpt_name = 'transformer_cc_model.pt'
-            saved_model = torch.load(ckpt_name)
+            saved_model = torch.load(ckpt_name, weights_only=True)
             classifier.load_state_dict(saved_model.state_dict())
 
         # trainer = SupervisedTrainer(data, classifier, train_mode='Contrastive_Classifier')

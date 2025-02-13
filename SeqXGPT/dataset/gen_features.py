@@ -27,9 +27,12 @@ def access_api(text, api_url, do_generate=False):
         }
         # msgpack.packb: Serializes post_data for transmission.
         # Sends a POST request to the API with the serialized data.
+        # prediction = client.post(api_url,
+        #                          data=msgpack.packb(post_data),
+        #                          headers={"Content-Type": "application/msgpack"},
+        #                          timeout=None)
         prediction = client.post(api_url,
                                  data=msgpack.packb(post_data),
-                                 headers={"Content-Type": "application/msgpack"},
                                  timeout=None)
     if prediction.status_code == 200:
         # msgpack.unpackb: Deserializes the response.
@@ -45,7 +48,8 @@ def get_features(type, input_file, output_file):
     """
 
     # Defines English (en) and Chinese (cn) model names for processing.
-    en_model_names = ['gpt_2', 'gpt_neo', 'gpt_J', 'llama']
+    # en_model_names = ['gpt_2', 'gpt_neo', 'gpt_J', 'llama']
+    en_model_names = ['gpt_2']
     cn_model_names = ['wenzhong', 'sky_text', 'damo', 'chatglm']
 
     gpt_2_api = 'http://localhost:20098/inference'
