@@ -54,7 +54,17 @@ class DataManager:
             self.train_dataloader = self.get_train_dataloader(datasets["train"])
         if test_path:
             self.test_dataloader = self.get_eval_dataloader(datasets["test"])
+        
+        ##############################
+        # Check for overlap between train and test data
+        train_texts = set([sample['text'] for sample in self.train_dataloader.dataset])
+        test_texts = set([sample['text'] for sample in self.test_dataloader.dataset])
 
+        overlap = train_texts.intersection(test_texts)
+        print('total train samples:', len(train_texts))
+        print(f"Overlap between train and test: {len(overlap)} samples")        
+        ##############################
+        
     def initialize_dataset(self, data_path, save_dir=''):
         # Generate a filename for saving processed data (currently unused).
         processed_data_filename = Path(data_path).stem + "_processed.pkl"
