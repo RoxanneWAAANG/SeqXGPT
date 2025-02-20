@@ -501,11 +501,6 @@ def split_dataset(data_path, train_path, test_path, train_ratio=0.9, seed=42):
     for file_name in file_names:
         file_path = os.path.join(data_path, file_name)
         with open(file_path, 'r', encoding='utf-8') as f:
-
-    # Load data from each JSONL file
-    for file_name in file_names:
-        file_path = os.path.join(data_path, file_name)
-        with open(file_path, 'r', encoding='utf-8') as f:
             samples = [json.loads(line) for line in f]
             total_samples.extend(samples)
     
@@ -534,7 +529,6 @@ def split_dataset(data_path, train_path, test_path, train_ratio=0.9, seed=42):
         """Helper function to save datasets in JSONL format."""
         """Helper function to save datasets in JSONL format."""
         with open(fpath, 'w', encoding='utf-8') as f:
-            for sample in tqdm(data_samples, desc=f"Saving {Path(fpath).stem}"):
             for sample in tqdm(data_samples, desc=f"Saving {Path(fpath).stem}"):
                 f.write(json.dumps(sample, ensure_ascii=False) + '\n')
 
