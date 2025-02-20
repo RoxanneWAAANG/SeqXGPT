@@ -81,6 +81,7 @@ def get_features(type, input_file, output_file):
         'gpt2': 0,
         'llama': 1,
         'human': 2,
+        'gpt3re': 3,
     }
 
     cn_labels = {
