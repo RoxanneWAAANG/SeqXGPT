@@ -53,6 +53,7 @@ class SupervisedTrainer:
         self.warm_up_ratio = args.warm_up_ratio
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print("Device:", self.device)
         # self.device = torch.device('cpu')
         self.model.to(self.device)
         self._create_optimizer_and_scheduler()
@@ -493,7 +494,7 @@ def parse_args():
     parser.add_argument("--stride", type=int, default=5)
     #=============================================#
 
-    parser.add_argument('--model', type=str, default='SeqXGPT')
+    parser.add_argument('--model', type=str, default='CNN')
     parser.add_argument('--gpu', type=str, default='0')
     parser.add_argument('--train_mode', type=str, default='classify')
     parser.add_argument('--batch_size', type=int, default=32)
@@ -522,8 +523,12 @@ if __name__ == "__main__":
 
     if args.split_dataset:
         print("Log INFO: split dataset...")
-        split_dataset(data_path=args.data_path, train_path=args.train_path, test_path=args.test_path, train_ratio=args.train_ratio)
-
+        split_dataset(
+            data_path=args.data_path, 
+            train_path=args.train_path, 
+            test_path=args.test_path, 
+            train_ratio=args.train_ratio
+        )
     # en_labels = backend_model_info.en_labels
     # en_labels = {
     #     'gpt2': 0,
@@ -568,6 +573,7 @@ if __name__ == "__main__":
             classifier = TransformerOnlyClassifier(id2labels=id2label, seq_len=args.seq_len)
             ckpt_name = 'rnn_cls_model.pt'
         else:
+            print('-' * 32 + "Transformer" + '-' * 32)
             classifier = ModelWiseTransformerClassifier(id2labels=id2label, seq_len=args.seq_len)
             ckpt_name = 'transformer_cls_model.pt'
 
@@ -575,11 +581,15 @@ if __name__ == "__main__":
 
         if args.do_test:    
             print("Log INFO: do test...")
-            classifier = SeqXGPTModel(embedding_size=512, seq_len=1024, num_layers=4, num_heads=2, id2labels=id2label)
+            if args.model == 'CNN':
+                trainer.load_model(ckpt_name)
+                trainer.test(content_level_eval=args.test_content)
+            elif args.model == 'SeqXGPT':
+                classifier = SeqXGPTModel(embedding_size=512, seq_len=1024, num_layers=4, num_heads=2, id2labels=id2label)
             #########################
-            trainer = SupervisedTrainer(data, classifier, en_labels, id2label, args)
-            trainer.load_model(ckpt_name)
-            trainer.test(content_level_eval=args.test_content)
+            # trainer = SupervisedTrainer(data, classifier, en_labels, id2label, args)
+            # trainer.load_model(ckpt_name)
+            # trainer.test(content_level_eval=args.test_content)
             ###########################
             # saved_model = torch.load(ckpt_name, weights_only=True)
             # trainer.model.load_state_dict(saved_model.state_dict())

@@ -296,6 +296,7 @@ class ModelWiseCNNClassifier(nn.Module):
         return out
 
     def forward(self, x, labels):
+        x = x.repeat(1, 1, 4)
         x = x.transpose(1, 2)
         out1 = self.conv_feat_extract(x[:, 0:1, :])  
         out2 = self.conv_feat_extract(x[:, 1:2, :])  
@@ -372,13 +373,15 @@ class ModelWiseTransformerClassifier(nn.Module):
         return out
 
     def forward(self, x, labels):
+        # x = x.repeat(1, 1, 4)
         mask = labels.gt(-1)
         padding_mask = ~mask
 
         # Processes inputs with CNN, adds positional encoding,
         # and passes through the Transformer encoder.
         x = x.transpose(1, 2)
-        out1 = self.conv_feat_extract(x[:, 0:1, :])  
+
+        out1 = self.conv_feat_extract(x[:, 0:1, :]) 
         out2 = self.conv_feat_extract(x[:, 1:2, :])  
         out3 = self.conv_feat_extract(x[:, 2:3, :])  
         out4 = self.conv_feat_extract(x[:, 3:4, :])  

@@ -79,7 +79,8 @@ def get_features(type, input_file, output_file):
 
     en_labels = {
         'gpt2': 0,
-        'human': 1,
+        'llama': 1,
+        'human': 2,
     }
 
     cn_labels = {
