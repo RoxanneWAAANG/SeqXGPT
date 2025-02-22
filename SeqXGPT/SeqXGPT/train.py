@@ -205,16 +205,6 @@ class SupervisedTrainer:
         print("🔍 **Predicted Labels Distribution**:", pred_counts)
         ######################
 
-        
-        ######################
-        # Count unique predictions
-        true_counts = Counter([label for seq in true_labels for label in seq if label != -1])
-        pred_counts = Counter([label for seq in pred_labels for label in seq if label != -1])
-
-        print("\n🔍 **True Labels Distribution**:", true_counts)
-        print("🔍 **Predicted Labels Distribution**:", pred_counts)
-        ######################
-
         # with open("", 'w') as f:
         #     f.write(json.dumps(total_logits[3], ensure_ascii=False) + '\n')
         #     f.write(json.dumps(texts[3], ensure_ascii=False) + '\n')
@@ -445,55 +435,6 @@ def split_dataset(data_path, train_path, test_path, train_ratio=0.9, seed=42):
     file_names = [file for file in os.listdir(data_path) if file.endswith('.jsonl')]
     print('*' * 32)
     print('The overall data sources:', file_names)
-# def split_dataset(data_path, train_path, test_path, train_ratio=0.9):
-#     file_names = [file_name for file_name in os.listdir(data_path) if file_name.endswith('.jsonl')]
-#     print('*'*32)
-#     print('The overall data sources:')
-#     print(file_names)
-#     file_paths = [os.path.join(data_path, file_name) for file_name in file_names]
-
-#     total_samples = []
-#     for file_path in file_paths:
-#         with open(file_path, 'r') as f:
-#             samples = [json.loads(line) for line in f]
-#             total_samples.extend(samples)
-    
-#     import random
-#     random.seed(0)
-#     random.shuffle(total_samples)
-
-#     split_index = int(len(total_samples) * train_ratio)
-#     train_data = total_samples[:split_index]
-#     test_data = total_samples[split_index:]
-
-#     def save_dataset(fpath, data_samples):
-#         with open(fpath, 'w', encoding='utf-8') as f:
-#             for sample in tqdm(data_samples):
-#                 f.write(json.dumps(sample, ensure_ascii=False) + '\n')
-#     save_dataset(train_path, train_data)
-#     save_dataset(test_path, test_data)
-#     print()
-#     print("The number of train dataset:", len(train_data))
-#     print("The number of test  dataset:", len(test_data))
-#     print('*'*32)
-#     pass
-
-def split_dataset(data_path, train_path, test_path, train_ratio=0.9, seed=42):
-    """
-    Splits the dataset into training and test sets ensuring no overlap.
-    
-    :param data_path: Path to the directory containing dataset files.
-    :param train_path: Path to save the training dataset.
-    :param test_path: Path to save the test dataset.
-    :param train_ratio: Fraction of data to use for training (default: 0.9).
-    :param seed: Random seed for reproducibility.
-    """
-    random.seed(seed)
-    
-    # Collect all JSONL files in the data directory
-    file_names = [file for file in os.listdir(data_path) if file.endswith('.jsonl')]
-    print('*' * 32)
-    print('The overall data sources:', file_names)
 
     total_samples = []
 
@@ -505,17 +446,8 @@ def split_dataset(data_path, train_path, test_path, train_ratio=0.9, seed=42):
             total_samples.extend(samples)
     
     # Shuffle the dataset
-    # Shuffle the dataset
     random.shuffle(total_samples)
 
-    # Get unique texts to prevent duplication
-    text_to_sample = {sample['text']: sample for sample in total_samples}
-    unique_samples = list(text_to_sample.values())
-
-    # Perform the train/test split
-    split_index = int(len(unique_samples) * train_ratio)
-    train_data = unique_samples[:split_index]
-    test_data = unique_samples[split_index:]
     # Get unique texts to prevent duplication
     text_to_sample = {sample['text']: sample for sample in total_samples}
     unique_samples = list(text_to_sample.values())
@@ -527,12 +459,9 @@ def split_dataset(data_path, train_path, test_path, train_ratio=0.9, seed=42):
 
     def save_dataset(fpath, data_samples):
         """Helper function to save datasets in JSONL format."""
-        """Helper function to save datasets in JSONL format."""
         with open(fpath, 'w', encoding='utf-8') as f:
             for sample in tqdm(data_samples, desc=f"Saving {Path(fpath).stem}"):
                 f.write(json.dumps(sample, ensure_ascii=False) + '\n')
-
-    # Save datasets
 
     # Save datasets
     save_dataset(train_path, train_data)
@@ -553,23 +482,6 @@ def split_dataset(data_path, train_path, test_path, train_ratio=0.9, seed=42):
 
     print('*' * 32)
 
-    print("\n✅ Dataset split completed!")
-    print(f"🚀 Train samples: {len(train_data)}")
-    print(f"🚀 Test samples: {len(test_data)}")
-
-    # Verify no overlap
-    train_texts = {sample['text'] for sample in train_data}
-    test_texts = {sample['text'] for sample in test_data}
-    overlap = train_texts.intersection(test_texts)
-
-    print(f"🔍 Overlap between train and test: {len(overlap)} samples (should be 0)")
-    assert len(overlap) == 0, "❌ Data leakage detected! Overlapping samples found in train and test sets."
-    print("✅ No data leakage! Train and test sets are properly split.")
-
-    print('*' * 32)
-
-
-
 import argparse
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -580,7 +492,7 @@ def parse_args():
     parser.add_argument("--stride", type=int, default=5)
     #=============================================#
 
-    parser.add_argument('--model', type=str, default='CNN')
+    parser.add_argument('--model', type=str, default='SeqXGPT')
     parser.add_argument('--gpu', type=str, default='0')
     parser.add_argument('--train_mode', type=str, default='classify')
     parser.add_argument('--batch_size', type=int, default=32)
@@ -634,14 +546,6 @@ if __name__ == "__main__":
     id2label = construct_bmes_labels(en_labels)
     label2id = {v: k for k, v in id2label.items()}
 
-    data = DataManager(
-                    train_path=args.train_path, 
-                    test_path=args.test_path, 
-                    batch_size=args.batch_size, 
-                    max_len=args.seq_len, 
-                    human_label='human', 
-                    id2label=id2label
-                    )
     data = DataManager(
                     train_path=args.train_path, 
                     test_path=args.test_path, 
