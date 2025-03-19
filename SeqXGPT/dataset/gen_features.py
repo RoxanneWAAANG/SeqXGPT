@@ -108,6 +108,7 @@ def get_features(type, input_file, output_file):
         for data in tqdm(lines):
             line = data['text']
             label = data['label']
+            prompt_len = data.get('prompt_len', 0)
 
             losses = []
             begin_idx_list = []
@@ -141,12 +142,69 @@ def get_features(type, input_file, output_file):
                 'losses': losses,
                 'begin_idx_list': begin_idx_list,
                 'll_tokens_list': ll_tokens_list,
+                'prompt_len': prompt_len,
                 'label_int': label_int,
                 'label': label,
                 'text': line
             }
 
             f.write(json.dumps(result, ensure_ascii=False) + '\n')
+
+
+def get_features_unlabeled(input_file, output_file):
+    """
+    Extract features from unlabeled text using GPT-2 server.
+
+    Args:
+        input_file (str): Path to the input JSONL file containing only text.
+        output_file (str): Path to save the extracted features.
+    """
+
+    # Define the API for GPT-2 model (update if needed)
+    gpt_2_api = 'http://localhost:20098/inference'
+    model_api = gpt_2_api
+
+    # Read input file containing text samples
+    with open(input_file, 'r') as f:
+        lines = [json.loads(line) for line in f]
+
+    print(f'Processing {len(lines)} samples from {input_file}')
+
+    # Open the output file to write processed features
+    with open(output_file, 'w', encoding='utf-8') as f:
+        for data in tqdm(lines):
+            line = data['text']
+            prompt_len = data.get('prompt_len', 0)
+
+            # Initialize storage variables
+            losses = []
+            begin_idx_list = []
+            ll_tokens_list = []
+
+            # Call API to get model inference results
+            try:
+                loss, begin_word_idx, ll_tokens = access_api(line, model_api)
+            except TypeError:
+                print("API returned NoneType, possible GPU OOM. Skipping sample.")
+                continue  # Skip faulty samples
+
+            # Store extracted features
+            losses.append(loss)
+            begin_idx_list.append(begin_word_idx)
+            ll_tokens_list.append(ll_tokens)
+
+            # Save the extracted features
+            result = {
+                'losses': losses,
+                'begin_idx_list': begin_idx_list,
+                'll_tokens_list': ll_tokens_list,
+                'prompt_len': prompt_len,
+                'text': line  # Retain the original text for reference
+            }
+
+            f.write(json.dumps(result, ensure_ascii=False) + '\n')
+
+    print(f"Feature extraction complete. Results saved to {output_file}")
 
 
 def process_features(input_file, output_file, do_normalize=False):
@@ -179,6 +237,7 @@ def process_features(input_file, output_file, do_normalize=False):
             losses = raw_feature['losses']
             begin_idx_list = raw_feature['begin_idx_list']
             ll_tokens_list = raw_feature['ll_tokens_list']
+            prompt_len = raw_feature['prompt_len']
             label_int = raw_feature['label_int']
             label = raw_feature['label']
             text = raw_feature['text']
@@ -279,6 +338,9 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_file", type=str, help="input file")
     parser.add_argument("--output_file", type=str, help="output file")
+
+    parser.add_argument("--get_unlabeled_features", action="store_true", help="Generate features from unlabeled text")
+
     # parser.add_argument("--add_loss", type=bool, default=True, help="when processing features, add loss")
     # parser.add_argument("--add_pct", type=bool, default=True, help="when processing features, add lt_zero_pct")
     # parser.add_argument("--add_std", type=bool, default=True, help="when processing features, add std")
@@ -384,6 +446,15 @@ if __name__ == "__main__":
         for t in threads:
             t.join()
 
+    elif args.get_unlabeled_features:
+        """
+        Extract features from unlabeled data
+        Example Usage:
+        python gen_features.py --get_unlabeled_features --input_file raw_data/unlabeled_text.jsonl --output_file features/unlabeled_features.jsonl
+        """
+        get_features_unlabeled(input_file=args.input_file, output_file=args.output_file)
+
+    
     elif args.process_features:
         
         print(args.do_normalize)

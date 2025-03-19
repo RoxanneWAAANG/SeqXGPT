@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-
 from typing import List, Tuple
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from transformers.models.bert import BertModel
@@ -11,8 +10,30 @@ import math
 import torch.nn.functional as F
 
 
+# Add this utility function at the top of the file, after imports
+def get_positional_encoding(seq_length, embedding_size, device=None):
+    """
+    Generates sinusoidal positional encodings for transformer models.
+    
+    Args:
+        seq_length: Maximum sequence length to generate positions for
+        embedding_size: Dimension of the embeddings
+        device: Device to create the tensor on (defaults to None)
+        
+    Returns:
+        Tensor of shape (1, seq_length, embedding_size) containing positional encodings
+    """
+    pe = torch.zeros(seq_length, embedding_size, device=device)
+    position = torch.arange(0, seq_length, dtype=torch.float, device=device).unsqueeze(1)
+    div_term = torch.exp(torch.arange(0, embedding_size, 2, dtype=torch.float, device=device) *
+                         -(math.log(10000.0) / embedding_size))
+    pe[:, 0::2] = torch.sin(position * div_term)
+    pe[:, 1::2] = torch.cos(position * div_term)
+    return pe.unsqueeze(0)  # Add batch dimension (1, seq_length, embedding_size)
+
+
 class SeqXGPTModel(nn.Module):
-    def __init__(self, id2labels, seq_len, embedding_size=4, num_heads=2,
+    def __init__(self, id2labels, embedding_size=128, num_heads=4,
                  intermediate_size=64, num_layers=2, dropout_rate=0.1):
         super().__init__()
         self.embedding_size = embedding_size
@@ -25,32 +46,28 @@ class SeqXGPTModel(nn.Module):
             dropout=dropout_rate,
             batch_first=True
         )
-        self.encoder = TransformerEncoder(encoder_layer=self.encoder_layer, num_layers=num_layers)
+        self.encoder = TransformerEncoder(encoder_layer=self.encoder_layer,
+                                          num_layers=num_layers)
         
         # Normalization, classifier, dropout, and CRF
         self.norm = nn.LayerNorm(embedding_size)
         self.label_num = len(id2labels)
         self.dropout = nn.Dropout(dropout_rate)
         self.classifier = nn.Sequential(nn.Linear(embedding_size, self.label_num))
-        self.crf = ConditionalRandomField(num_tags=self.label_num,
-                                           allowed_transitions=allowed_transitions(id2labels))
+        # self.crf = ConditionalRandomField(num_tags=self.label_num,
+        #                                    allowed_transitions=allowed_transitions(id2labels))
+        self.crf = ConditionalRandomField(num_tags=self.label_num, allowed_transitions=None)
         self.crf.trans_m.data *= 0
 
-    def forward(self, inputs, labels, method="patch_average", patch_size=10,
-                kernel_size=10, stride=5):
+    def forward(self, inputs, labels, method="patch_average", patch_size=3,
+                kernel_size=3, stride=1):
         """
+        Unified forward method to match other models' interface
         inputs: Tensor of shape (batch, original_seq_len, embedding_size)
         labels: Tensor of shape (batch, original_seq_len) with -1 indicating padding
-        method: One of "patch_average", "convolution_like", or "patch_shuffle"
         """
         # Create the original valid token mask from labels (True for valid tokens)
         orig_mask = labels.gt(-1)  # shape: (batch, original_seq_len)
-
-        # print('=======Before Preprocessing=======')
-        # print(f"Original input shape: {inputs.shape}")
-        # print(f"Original label shape: {labels.shape}")
-        # print(f"Sample labels: {labels[0].cpu().numpy()[:10]}")
-        # print('==================================')
         
         # Preprocess inputs and at the same time process the mask and labels
         if method == "patch_average":
@@ -68,18 +85,33 @@ class SeqXGPTModel(nn.Module):
         else:
             raise ValueError(f"Unknown method: {method}")
         
-        # print('=======After Preprocessing=======')
-        # print(f"Processed input shape: {inputs.shape}")
-        # print(f"Processed label shape: {proc_labels.shape}")
-        # print(f"Processed sample labels: {proc_labels[0].cpu().numpy()[:10]}")
-        # print('==================================')
+        #=============================================#
+        # Ensure mask has the same sequence length as inputs
+        current_seq_length = inputs.size(1)
+        if mask.size(1) != current_seq_length:
+            # Either truncate or pad the mask to match the sequence length
+            if mask.size(1) > current_seq_length:
+                mask = mask[:, :current_seq_length]
+            else:
+                pad_size = current_seq_length - mask.size(1)
+                mask = F.pad(mask, (0, pad_size), value=False)
+            
+            # Also adjust proc_labels to match
+            if proc_labels.size(1) != current_seq_length:
+                if proc_labels.size(1) > current_seq_length:
+                    proc_labels = proc_labels[:, :current_seq_length]
+                else:
+                    pad_size = current_seq_length - proc_labels.size(1)
+                    proc_labels = F.pad(proc_labels, (0, pad_size), value=-1)
+        #=============================================#
+        
         # Transformer expects a padding mask where True indicates a padded token.
         padding_mask = ~mask  # shape: (batch, new_seq_len)
         
         # Dynamically generate positional encoding for the new sequence length.
-        current_seq_length = inputs.size(1)
-        pos_encoding = self.get_positional_encoding(current_seq_length, self.embedding_size, inputs.device)
-        
+        # current_seq_length = inputs.size(1)
+        pos_encoding = get_positional_encoding(current_seq_length, self.embedding_size, inputs.device)
+                
         # Add positional encoding to the processed inputs.
         outputs = inputs + pos_encoding  # shape: (batch, new_seq_len, embedding_size)
         outputs = self.norm(outputs)
@@ -88,6 +120,12 @@ class SeqXGPTModel(nn.Module):
         logits = self.classifier(dropout_outputs)
 
         if self.training:
+            # # Calculate class weights based on label distribution
+            # label_counts = torch.bincount(proc_labels[proc_labels != -1])
+            # weights = 1.0 / (label_counts.float() / label_counts.sum())
+            # # Normalize weights
+            # weights = weights / weights.sum() * len(weights)
+            # loss_fct = nn.CrossEntropyLoss(weight=weights, ignore_index=-1)
             loss_fct = nn.CrossEntropyLoss(ignore_index=-1)
             loss = loss_fct(logits.view(-1, self.label_num), proc_labels.view(-1))
             return {
@@ -97,11 +135,9 @@ class SeqXGPTModel(nn.Module):
         else:
             paths, scores = self.crf.viterbi_decode(logits=logits, mask=mask)
             paths[mask == 0] = -1
-            # Include processed labels in the output
             return {
                     'preds': paths,
-                    'logits': logits,
-                    'proc_labels': proc_labels
+                    'logits': logits
                     }
 
     # -------------------------
@@ -186,11 +222,28 @@ class SeqXGPTModel(nn.Module):
         random.shuffle(patches)
         return torch.cat(patches, dim=1)
 
+    # Modify patch_labels to better preserve label information
     def patch_labels(self, labels, patch_size):
         batch_size, seq_len = labels.shape
         pad_size = (patch_size - (seq_len % patch_size)) % patch_size
         padded = F.pad(labels, (0, pad_size), value=-1)
-        return padded.view(batch_size, -1, patch_size)[:, :, 0]  # Take first label per patch
+        # Instead of just taking first label, use majority voting within each patch
+        patches = padded.view(batch_size, -1, patch_size)
+        result = []
+        for b in range(batch_size):
+            batch_result = []
+            for p in range(patches.size(1)):
+                patch = patches[b, p]
+                # Filter out padding
+                valid_labels = patch[patch != -1]
+                if len(valid_labels) > 0:
+                    # Use most common label in patch
+                    values, counts = torch.unique(valid_labels, return_counts=True)
+                    batch_result.append(values[counts.argmax()].item())
+                else:
+                    batch_result.append(-1)
+            result.append(batch_result)
+        return torch.tensor(result, device=labels.device)
 
     def convolution_like_labels(self, labels, kernel_size, stride):
         """Processes labels with a sliding window."""
@@ -207,24 +260,6 @@ class SeqXGPTModel(nn.Module):
         patches = [labels[:, i:i+patch_size] for i in range(0, labels.size(1), patch_size)]
         random.shuffle(patches)
         return torch.cat(patches, dim=1)
-
-    # -------------------------
-    # Dynamic Positional Encoding
-    # -------------------------
-    @staticmethod
-    def get_positional_encoding(seq_length, embedding_size, device):
-        """
-        Dynamically generates sinusoidal positional encodings.
-        Returns a tensor of shape (1, seq_length, embedding_size) to be broadcast
-        over the batch dimension.
-        """
-        pe = torch.zeros(seq_length, embedding_size, device=device)
-        position = torch.arange(0, seq_length, dtype=torch.float, device=device).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, embedding_size, 2, dtype=torch.float, device=device) *
-                             -(math.log(10000.0) / embedding_size))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        return pe.unsqueeze(0)
 
 
 # Feature Extraction: CNN.
@@ -245,9 +280,7 @@ class ConvFeatureExtractionModel(nn.Module):
             return nn.Sequential(
                 nn.Conv1d(in_channels=n_in, out_channels=n_out, kernel_size=k, stride=stride, padding=padding, bias=conv_bias),
                 nn.Dropout(conv_dropout),
-                # nn.BatchNorm1d(n_out),
                 nn.ReLU(),
-                # nn.MaxPool1d(kernel_size=2, stride=2)
             )
 
         in_d = 1
@@ -287,7 +320,8 @@ class ModelWiseCNNClassifier(nn.Module):
         self.classifier = nn.Sequential(nn.Linear(embedding_size, self.label_num))
         # Conditional Random Field (CRF) ensures structured predictions with label dependencies.
         # Allowed Transitions: Defined by id2labels for valid label sequences.
-        self.crf = ConditionalRandomField(num_tags=self.label_num, allowed_transitions=allowed_transitions(id2labels))
+        # self.crf = ConditionalRandomField(num_tags=self.label_num, allowed_transitions=allowed_transitions(id2labels))
+        self.crf = ConditionalRandomField(num_tags=self.label_num, allowed_transitions=None)
         self.crf.trans_m.data *= 0
 
     def conv_feat_extract(self, x):
@@ -296,7 +330,6 @@ class ModelWiseCNNClassifier(nn.Module):
         return out
 
     def forward(self, x, labels):
-        x = x.repeat(1, 1, 4)
         x = x.transpose(1, 2)
         out1 = self.conv_feat_extract(x[:, 0:1, :])  
         out2 = self.conv_feat_extract(x[:, 1:2, :])  
@@ -331,7 +364,6 @@ class ModelWiseTransformerClassifier(nn.Module):
 
     def __init__(self, id2labels, seq_len, intermediate_size = 512, num_layers=2, dropout_rate=0.1):
         super(ModelWiseTransformerClassifier, self).__init__()
-        # feature_enc_layers = [(512, 10, 5)] + [(512, 3, 2)] * 4 + [(512,2,2)] + [(512,2,2)]
         feature_enc_layers = [(64, 5, 1)] + [(128, 3, 1)] * 3 + [(64, 3, 1)]
         self.conv = ConvFeatureExtractionModel(
             conv_layers=feature_enc_layers,
@@ -339,7 +371,7 @@ class ModelWiseTransformerClassifier(nn.Module):
             conv_bias=False,
         )
         
-        self.seq_len = seq_len          # MAX Seq_len
+        self.seq_len = seq_len
         embedding_size = 4 *64
         self.encoder_layer = TransformerEncoderLayer(
             d_model=embedding_size,
@@ -349,15 +381,10 @@ class ModelWiseTransformerClassifier(nn.Module):
             batch_first=True)
         self.encoder = TransformerEncoder(encoder_layer=self.encoder_layer,
                                             num_layers=num_layers)
-
-        self.position_encoding = torch.zeros((seq_len, embedding_size))
-        for pos in range(seq_len):
-            for i in range(0, embedding_size, 2):
-                self.position_encoding[pos, i] = torch.sin(
-                    torch.tensor(pos / (10000**((2 * i) / embedding_size))))
-                self.position_encoding[pos, i + 1] = torch.cos(
-                    torch.tensor(pos / (10000**((2 *
-                                                 (i + 1)) / embedding_size))))
+        self.register_buffer(
+            'position_encoding', 
+            get_positional_encoding(seq_len, embedding_size)
+        )
         
         self.norm = nn.LayerNorm(embedding_size)
         
@@ -373,15 +400,13 @@ class ModelWiseTransformerClassifier(nn.Module):
         return out
 
     def forward(self, x, labels):
-        # x = x.repeat(1, 1, 4)
         mask = labels.gt(-1)
         padding_mask = ~mask
 
         # Processes inputs with CNN, adds positional encoding,
         # and passes through the Transformer encoder.
         x = x.transpose(1, 2)
-
-        out1 = self.conv_feat_extract(x[:, 0:1, :]) 
+        out1 = self.conv_feat_extract(x[:, 0:1, :])  
         out2 = self.conv_feat_extract(x[:, 1:2, :])  
         out3 = self.conv_feat_extract(x[:, 2:3, :])  
         out4 = self.conv_feat_extract(x[:, 3:4, :])  
@@ -412,7 +437,7 @@ class ModelWiseTransformerClassifier(nn.Module):
 # Directly process sequences using a Transformer encoder.
 class TransformerOnlyClassifier(nn.Module):
 
-    def __init__(self, id2labels, seq_len, embedding_size=4, num_heads=2, intermediate_size=64, num_layers=2, dropout_rate=0.1):
+    def __init__(self, id2labels, seq_len, embedding_size=64, num_heads=2, intermediate_size=64, num_layers=2, dropout_rate=0.1):
         super(TransformerOnlyClassifier, self).__init__()
 
         self.encoder_layer = TransformerEncoderLayer(
@@ -430,15 +455,25 @@ class TransformerOnlyClassifier(nn.Module):
                 self.position_encoding[pos, i] = torch.sin(
                     torch.tensor(pos / (10000**((2 * i) / embedding_size))))
                 self.position_encoding[pos, i + 1] = torch.cos(
-                    torch.tensor(pos / (10000**((2 *
-                                                 (i + 1)) / embedding_size))))
+                    torch.tensor(pos / (10000**((2 * (i + 1)) / embedding_size))))
+        # self.register_buffer(
+        #     'position_encoding', 
+        #     get_positional_encoding(seq_len, embedding_size)
+        # )
         
         self.norm = nn.LayerNorm(embedding_size)
         
         self.label_num = len(id2labels)
         self.dropout = nn.Dropout(dropout_rate)
-        self.classifier = nn.Sequential(nn.Linear(embedding_size, self.label_num))
-        self.crf = ConditionalRandomField(num_tags=self.label_num, allowed_transitions=allowed_transitions(id2labels))
+        # self.classifier = nn.Sequential(nn.Linear(embedding_size, self.label_num))
+        self.classifier = nn.Sequential(
+            nn.Linear(embedding_size, embedding_size // 2),
+            nn.ReLU(),
+            nn.Linear(embedding_size // 2, self.label_num)
+        )
+        # self.crf = ConditionalRandomField(num_tags=self.label_num,
+        #                                   allowed_transitions=allowed_transitions(id2labels))
+        self.crf = ConditionalRandomField(num_tags=self.label_num, allowed_transitions=None)
         self.crf.trans_m.data *= 0
     
     def forward(self, inputs, labels):

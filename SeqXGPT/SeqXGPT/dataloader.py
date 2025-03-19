@@ -70,39 +70,28 @@ class DataManager:
         processed_data_filename = Path(data_path).stem + "_processed.pkl"
         processed_data_path = os.path.join(save_dir, processed_data_filename)
 
-        # if os.path.exists(processed_data_path):
-        #     log_info = '*'*4 + 'Load From {}'.format(processed_data_path) + '*'*4
-        #     print('*' * len(log_info))
-        #     print(log_info)
-        #     print('*' * len(log_info))
-        #     with open(processed_data_path, 'rb') as f:
-        #         samples_dict = pickle.load(f)
-        #     return samples_dict
-
         # Load raw data based on file type (JSON or JSONL).
-        with open(data_path, 'r') as f:
+        with open(data_path, 'r', encoding='utf-8') as f:
             if data_path.endswith('json'):
                 samples = json.load(f)
             else:
                 samples = [json.loads(line) for line in f]
 
         # Initialize an empty dictionary to store processed samples.
-        samples_dict = {'features': [], 'prompt_len': [], 'label': [], 'text': []}
+        samples_dict = {
+            'features': [],
+            'prompt_len': [],
+            'label': [],
+            # 'label_int': [],
+            'text': []
+        }
 
         # Iterate over samples with a progress bar.
         for item in tqdm(samples):
             text = item['text']
             label = item['label']
             prompt_len = item.get('prompt_len', 0)
-            # prompt_len = item['prompt_len']
-            # prompt_len = 0
-
-            # if label in ['gptj', 'gpt2', 'llama', 'gpt3re']:
-            #     continue
-            # if label == 'gpt3sum':
-            #     label = 'gpt3re'
-            # if label == 'gpt3re':
-            #     continue
+            # prompt_len = len(text)
 
             # Extract and align token-level features.
             label_int = item['label_int']
@@ -132,20 +121,16 @@ class DataManager:
 
             # Transpose the token features for compatibility with the model.
             ll_tokens_list = np.array(ll_tokens_list)
-            # ll_tokens_list = normalize(ll_tokens_list, norm='l1')
             ll_tokens_list = ll_tokens_list.transpose()
             ll_tokens_list = ll_tokens_list.tolist()
 
             samples_dict['features'].append(ll_tokens_list)
             samples_dict['prompt_len'].append(prompt_len)
             samples_dict['label'].append(label)
+            # samples_dict['label_int'].append(label_int)
             samples_dict['text'].append(text)
-        
-        # with open(processed_data_path, 'wb') as f:
-        #     pickle.dump(samples_dict, f)
 
         return samples_dict
-
 
     def get_train_dataloader(self, dataset):
         return DataLoader(dataset,
@@ -160,8 +145,6 @@ class DataManager:
                           collate_fn=self.data_collator)
     
     def data_collator(self, samples):
-        # samples: {'features': [], 'prompt_len': [], 'label': [], 'text': []}
-        # batch: {'features': [], 'labels': [], 'text': []}
         batch = {}
 
         # Extract fields from the samples.
@@ -212,24 +195,27 @@ class DataManager:
         - E-: End of a sequence.
         - S-: Single-token sequences.
         """
-        prefix = ['B-', 'M-', 'E-', 'S-']
         if seq_len <= 0:
             return None
-        # Special case for single-token sequences.
-        elif seq_len == 1:
-            # Assign the 'S-' prefix.
-            label = 'S-' + label
-            return torch.tensor([self.label2id[label]], dtype=torch.long)
-        # For sequences with more than one token:
-        else:
-            ids = []
-            # Add the 'B-' label for the start of the sequence.
-            ids.append(self.label2id['B-'+label])
-            # Add 'M-' labels for the middle tokens.
-            ids.extend([self.label2id['M-'+label]] * (seq_len - 2))
-            # Add the 'E-' label for the end of the sequence.
-            ids.append(self.label2id['E-'+label])
-            return torch.tensor(ids, dtype=torch.long)
+        return torch.tensor([self.label2id[label]] * seq_len, dtype=torch.long)
+        # prefix = ['B-', 'M-', 'E-', 'S-']
+        # if seq_len <= 0:
+        #     return None
+        # # Special case for single-token sequences.
+        # elif seq_len == 1:
+        #     # Assign the 'S-' prefix.
+        #     label = 'S-' + label
+        #     return torch.tensor([self.label2id[label]], dtype=torch.long)
+        # # For sequences with more than one token:
+        # else:
+        #     ids = []
+        #     # Add the 'B-' label for the start of the sequence.
+        #     ids.append(self.label2id['B-'+label])
+        #     # Add 'M-' labels for the middle tokens.
+        #     ids.extend([self.label2id['M-'+label]] * (seq_len - 2))
+        #     # Add the 'E-' label for the end of the sequence.
+        #     ids.append(self.label2id['E-'+label])
+        #     return torch.tensor(ids, dtype=torch.long)
 
     def process_and_convert_to_tensor(self, data):
         """ here, data is features. """
